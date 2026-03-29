@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>ARIA – Incident Analysis & Response</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Syne:wght@400;600;800&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="/static/css/aria.css"/>
+  <style>/* legacy inline – kept empty, styles now in aria.css */
+    :root {
+      --bg:       #050b14;
+      --surface:  #0a1628;
+      --border:   #1a2d4a;
+      --accent:   #00c8ff;
+      --red:      #ff3b5c;
+      --orange:   #ff8c00;
+      --yellow:   #f5c518;
+      --green:    #00e5a0;
+      --text:     #c8d8ec;
+      --dim:      #4a6480;
+      --mono:     'Share Tech Mono', monospace;
+      --sans:     'Syne', sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Grid scanline overlay ── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background: repeating-linear-gradient(
+        0deg, transparent, transparent 2px,
+        rgba(0,200,255,.015) 2px, rgba(0,200,255,.015) 4px
+      );
+      pointer-events: none; z-index: 0;
+    }
+
+    /* ── Top bar ── */
+    header {
+      position: sticky; top: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 28px;
+      background: rgba(5,11,20,.92);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(12px);
+    }
+    .logo {
+      font-size: 22px; font-weight: 800; letter-spacing: 3px;
+      color: var(--accent);
+      text-shadow: 0 0 20px rgba(0,200,255,.5);
+    }
+    .logo span { color: var(--dim); font-weight: 400; font-size: 11px; letter-spacing: 2px; margin-left: 8px; }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 12px var(--green);
+      animation: pulse 2s infinite;
+      display: inline-block; margin-right: 8px;
+    }
+    .status-label { font-family: var(--mono); font-size: 11px; color: var(--green); }
+    #clock { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+
+    @keyframes pulse {
+      0%,100% { opacity: 1; box-shadow: 0 0 12px var(--green); }
+      50%      { opacity: .5; box-shadow: 0 0 4px var(--green); }
+    }
+
+    /* ── Layout ── */
+    main { padding: 24px 28px; position: relative; z-index: 1; }
+
+    /* ── Stat cards ── */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px; margin-bottom: 24px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px; padding: 20px;
+      position: relative; overflow: hidden;
+      transition: border-color .2s;
+    }
+    .card:hover { border-color: var(--accent); }
+    .card::before {
+      content: ''; position: absolute; top: 0; left: 0;
+      width: 3px; height: 100%;
+    }
+    .card.critical::before { background: var(--red); }
+    .card.high::before     { background: var(--orange); }
+    .card.medium::before   { background: var(--yellow); }
+    .card.info::before     { background: var(--accent); }
+    .card-label {
+      font-size: 10px; letter-spacing: 2px; text-transform: uppercase;
+      color: var(--dim); margin-bottom: 10px;
+    }
+    .card-value {
+      font-size: 36px; font-weight: 800; line-height: 1;
+      color: #fff;
+    }
+    .card.critical .card-value { color: var(--red);    text-shadow: 0 0 20px rgba(255,59,92,.4); }
+    .card.high .card-value     { color: var(--orange);  text-shadow: 0 0 20px rgba(255,140,0,.4); }
+    .card.info .card-value     { color: var(--accent);  text-shadow: 0 0 20px rgba(0,200,255,.4); }
+
+    /* ── Two-column layout ── */
+    .row { display: grid; gap: 16px; margin-bottom: 16px; }
+    .row-3-1 { grid-template-columns: 2fr 1fr; }
+    .row-2 { grid-template-columns: 1fr 1fr; }
+
+    /* ── Panel ── */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px; overflow: hidden;
+    }
+    .panel-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--dim);
+    }
+    .panel-body { padding: 16px; }
+
+    /* ── Live feed ── */
+    #live-feed {
+      height: 320px; overflow-y: auto;
+      font-family: var(--mono); font-size: 11px; line-height: 1.8;
+      scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+    }
+    .feed-line { display: flex; gap: 10px; padding: 2px 0; border-bottom: 1px solid rgba(26,45,74,.4); }
+    .feed-ts   { color: var(--dim); white-space: nowrap; }
+    .feed-ip   { color: var(--accent); white-space: nowrap; min-width: 110px; }
+    .feed-msg  { color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .feed-line.high     .feed-msg { color: var(--orange); }
+    .feed-line.critical .feed-msg { color: var(--red); animation: flash .4s ease; }
+    @keyframes flash {
+      0%   { background: rgba(255,59,92,.15); }
+      100% { background: transparent; }
+    }
+
+    /* ── Chart canvases ── */
+    .chart-wrap { position: relative; height: 240px; }
+
+    /* ── Anomaly gauge ── */
+    .gauge-wrap { text-align: center; padding: 20px 0; }
+    .gauge-value { font-size: 56px; font-weight: 800; font-family: var(--mono); }
+    .gauge-label { font-size: 11px; letter-spacing: 2px; color: var(--dim); margin-top: 6px; }
+    .gauge-bar {
+      height: 8px; border-radius: 4px; margin: 16px 20px 0;
+      background: linear-gradient(90deg, var(--green), var(--yellow), var(--red));
+      position: relative;
+    }
+    .gauge-needle {
+      position: absolute; top: -6px;
+      width: 4px; height: 20px; border-radius: 2px;
+      background: #fff;
+      transform: translateX(-50%);
+      transition: left .6s ease;
+      box-shadow: 0 0 10px #fff;
+    }
+
+    /* ── Alert table ── */
+    .table-controls {
+      display: flex; gap: 10px; padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .table-controls input, .table-controls select {
+      background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); border-radius: 4px; padding: 6px 12px;
+      font-family: var(--mono); font-size: 12px; outline: none;
+    }
+    .table-controls input:focus, .table-controls select:focus {
+      border-color: var(--accent);
+    }
+    .table-wrap { overflow-x: auto; }
+    table {
+      width: 100%; border-collapse: collapse;
+      font-size: 12px; font-family: var(--mono);
+    }
+    thead { background: var(--bg); }
+    th {
+      text-align: left; padding: 10px 14px;
+      font-size: 10px; letter-spacing: 1.5px; color: var(--dim);
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(26,45,74,.5);
+      vertical-align: middle;
+    }
+    tr:hover td { background: rgba(0,200,255,.03); }
+
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 3px;
+      font-size: 10px; letter-spacing: 1px; font-weight: 600;
+    }
+    .badge.CRITICAL { background: rgba(255,59,92,.15); color: var(--red); border: 1px solid rgba(255,59,92,.3); }
+    .badge.HIGH     { background: rgba(255,140,0,.15); color: var(--orange); border: 1px solid rgba(255,140,0,.3); }
+    .badge.MEDIUM   { background: rgba(245,197,24,.15); color: var(--yellow); border: 1px solid rgba(245,197,24,.3); }
+    .badge.LOW      { background: rgba(0,229,160,.10); color: var(--green); border: 1px solid rgba(0,229,160,.2); }
+
+    .score-bar {
+      height: 4px; border-radius: 2px; min-width: 60px;
+      background: var(--border); position: relative; overflow: hidden;
+    }
+    .score-fill {
+      position: absolute; left: 0; top: 0; height: 100%; border-radius: 2px;
+      transition: width .4s;
+    }
+
+    .btn-summary {
+      background: transparent; border: 1px solid var(--border);
+      color: var(--accent); padding: 3px 10px; border-radius: 3px;
+      font-family: var(--mono); font-size: 10px; cursor: pointer;
+      transition: all .15s;
+    }
+    .btn-summary:hover { border-color: var(--accent); background: rgba(0,200,255,.08); }
+
+    .pagination {
+      display: flex; align-items: center; gap: 12px;
+      padding: 12px 16px; border-top: 1px solid var(--border);
+      font-family: var(--mono); font-size: 12px;
+    }
+    .btn-page {
+      background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); padding: 4px 12px; border-radius: 4px;
+      cursor: pointer; transition: border-color .15s;
+    }
+    .btn-page:hover:not(:disabled) { border-color: var(--accent); }
+    .btn-page:disabled { opacity: .3; cursor: default; }
+
+    /* ── Summary modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 200;
+      display: none; align-items: center; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--accent);
+      border-radius: 10px; padding: 28px; max-width: 540px; width: 90%;
+      box-shadow: 0 0 60px rgba(0,200,255,.15);
+    }
+    .modal h3 { font-size: 13px; letter-spacing: 2px; color: var(--accent); margin-bottom: 16px; }
+    .modal p  { font-family: var(--mono); font-size: 13px; line-height: 1.7; color: var(--text); }
+    .modal .close-btn {
+      margin-top: 20px; float: right;
+      background: rgba(0,200,255,.1); border: 1px solid var(--accent);
+      color: var(--accent); padding: 6px 18px; border-radius: 4px;
+      cursor: pointer; font-family: var(--mono); font-size: 11px;
+    }
+
+    @media (max-width: 800px) {
+      .row-3-1, .row-2 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div style="display:flex;align-items:center;gap:16px;">
+    <div class="logo">ARIA <span>AUTONOMOUS INCIDENT RESPONSE</span></div>
+  </div>
+  <div style="display:flex;align-items:center;gap:20px;">
+    <div><span class="status-dot"></span><span class="status-label">MONITORING ACTIVE</span></div>
+    <div id="clock">--:--:--</div>
+  </div>
+</header>
+
+<main>
+  <!-- Stat cards -->
+  <div class="cards">
+    <div class="card critical">
+      <div class="card-label">Critical Alerts</div>
+      <div class="card-value" id="stat-critical">–</div>
+    </div>
+    <div class="card high">
+      <div class="card-label">High Severity</div>
+      <div class="card-value" id="stat-high">–</div>
+    </div>
+    <div class="card info">
+      <div class="card-label">Last Hour</div>
+      <div class="card-value" id="stat-1h">–</div>
+    </div>
+    <div class="card info">
+      <div class="card-label">Total Incidents</div>
+      <div class="card-value" id="stat-total">–</div>
+    </div>
+  </div>
+
+  <!-- Row 1: Timeline + Gauge -->
+  <div class="row row-3-1">
+    <div class="panel">
+      <div class="panel-header">
+        Event Timeline <span id="timeline-range">last 60 min</span>
+      </div>
+      <div class="panel-body">
+        <div class="chart-wrap"><canvas id="timeline-chart"></canvas></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">Threat Level</div>
+      <div class="gauge-wrap" id="gauge-wrap">
+        <div class="gauge-value" id="gauge-val" style="color:var(--green)">0.00</div>
+        <div class="gauge-label">AVG ANOMALY SCORE</div>
+        <div class="gauge-bar"><div class="gauge-needle" id="gauge-needle" style="left:0%"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Row 2: Severity chart + Top IPs -->
+  <div class="row row-2">
+    <div class="panel">
+      <div class="panel-header">Severity Breakdown</div>
+      <div class="panel-body">
+        <div class="chart-wrap"><canvas id="sev-chart"></canvas></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header">Top Offending IPs</div>
+      <div class="panel-body" id="top-ips" style="font-family:var(--mono);font-size:12px;"></div>
+    </div>
+  </div>
+
+  <!-- Live feed -->
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-header">
+      Real-time Event Feed
+      <span style="font-size:10px;color:var(--dim)" id="feed-count">0 events</span>
+    </div>
+    <div id="live-feed"></div>
+  </div>
+
+  <!-- Alert table -->
+  <div class="panel">
+    <div class="panel-header">Incident Alert Table</div>
+    <div class="table-controls">
+      <input id="search-input" type="text" placeholder="Search IP, attack, MITRE..." style="flex:1;min-width:160px;"/>
+      <select id="sev-filter">
+        <option value="">All Severities</option>
+        <option value="CRITICAL">Critical</option>
+        <option value="HIGH">High</option>
+        <option value="MEDIUM">Medium</option>
+        <option value="LOW">Low</option>
+      </select>
+      <button class="btn-summary" onclick="loadAlerts(1)">Apply</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Timestamp</th>
+            <th>Source IP</th>
+            <th>Attack Type</th>
+            <th>MITRE</th>
+            <th>Score</th>
+            <th>Severity</th>
+            <th>Summary</th>
+          </tr>
+        </thead>
+        <tbody id="alert-tbody"></tbody>
+      </table>
+    </div>
+    <div class="pagination">
+      <button class="btn-page" id="btn-prev" onclick="prevPage()">← Prev</button>
+      <span id="page-info" style="color:var(--dim);">Page 1</span>
+      <button class="btn-page" id="btn-next" onclick="nextPage()">Next →</button>
+      <span id="total-info" style="color:var(--dim);margin-left:auto;"></span>
+    </div>
+  </div>
+</main>
+
+<!-- Summary modal -->
+<div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
+  <div class="modal">
+    <h3>AI INCIDENT SUMMARY</h3>
+    <p id="modal-text">Loading…</p>
+    <button class="close-btn" onclick="closeModal()">CLOSE</button>
+  </div>
+</div>
+
+<script src="/static/js/aria.js"></script>
+<script>
+// ── Clock ─────────────────────────────────────────────────────────────────────
+function updateClock() {
+  document.getElementById('clock').textContent =
+    new Date().toUTCString().slice(17, 25) + ' UTC';
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ── Charts ────────────────────────────────────────────────────────────────────
+Chart.defaults.color = '#4a6480';
+Chart.defaults.borderColor = '#1a2d4a';
+
+const tlCtx = document.getElementById('timeline-chart').getContext('2d');
+const tlChart = new Chart(tlCtx, {
+  type: 'line',
+  data: { labels: [], datasets: [{
+    label: 'Events/min', data: [],
+    borderColor: '#00c8ff', backgroundColor: 'rgba(0,200,255,.08)',
+    borderWidth: 2, fill: true, tension: 0.4, pointRadius: 2,
+  }]},
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { maxTicksLimit: 8, font: { family: 'Share Tech Mono', size: 10 } } },
+      y: { beginAtZero: true, ticks: { font: { family: 'Share Tech Mono', size: 10 } } }
+    }
+  }
+});
+
+const sevCtx = document.getElementById('sev-chart').getContext('2d');
+const sevChart = new Chart(sevCtx, {
+  type: 'doughnut',
+  data: {
+    labels: ['CRITICAL','HIGH','MEDIUM','LOW'],
+    datasets: [{
+      data: [0,0,0,0],
+      backgroundColor: ['#ff3b5c','#ff8c00','#f5c518','#00e5a0'],
+      borderWidth: 0,
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { position: 'right', labels: { font: { family: 'Share Tech Mono', size: 11 } } } },
+    cutout: '68%',
+  }
+});
+
+// ── Stats refresh ─────────────────────────────────────────────────────────────
+async function refreshStats() {
+  const r = await fetch('/api/stats');
+  const d = await r.json();
+  document.getElementById('stat-critical').textContent = d.critical ?? 0;
+  document.getElementById('stat-high').textContent     = d.high ?? 0;
+  document.getElementById('stat-1h').textContent       = d.last_1h ?? 0;
+  document.getElementById('stat-total').textContent    = d.total_alerts ?? 0;
+
+  const score = d.avg_anomaly_score ?? 0;
+  document.getElementById('gauge-val').textContent = score.toFixed(2);
+  const pct = Math.min(score * 100, 100);
+  document.getElementById('gauge-needle').style.left = pct + '%';
+  const el = document.getElementById('gauge-val');
+  el.style.color = score > .7 ? 'var(--red)' : score > .4 ? 'var(--orange)' : 'var(--green)';
+}
+
+async function refreshTimeline() {
+  const r = await fetch('/api/timeline');
+  const d = await r.json();
+  tlChart.data.labels   = d.map(x => x.bucket.slice(11,16));
+  tlChart.data.datasets[0].data = d.map(x => x.count);
+  tlChart.update();
+}
+
+async function refreshSeverity() {
+  const r = await fetch('/api/severity_breakdown');
+  const d = await r.json();
+  sevChart.data.datasets[0].data = [
+    d.CRITICAL||0, d.HIGH||0, d.MEDIUM||0, d.LOW||0
+  ];
+  sevChart.update();
+}
+
+async function refreshTopIPs() {
+  const r = await fetch('/api/top_ips');
+  const d = await r.json();
+  const el = document.getElementById('top-ips');
+  if (!d.length) { el.innerHTML = '<span style="color:var(--dim)">No data yet</span>'; return; }
+  el.innerHTML = d.map((x,i) => `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+      <span style="color:var(--dim);min-width:16px;">${i+1}.</span>
+      <span style="color:var(--accent);flex:1;">${x.source_ip}</span>
+      <span style="color:var(--dim);">${x.hit_count} hits</span>
+      <span class="badge ${x.max_severity}">${x.max_severity}</span>
+    </div>
+  `).join('');
+}
+
+function refreshAll() {
+  refreshStats();
+  refreshTimeline();
+  refreshSeverity();
+  refreshTopIPs();
+}
+setInterval(refreshAll, 5000);
+refreshAll();
+
+// ── Alert table ───────────────────────────────────────────────────────────────
+let currentPage = 1;
+
+async function loadAlerts(page = 1) {
+  currentPage = page;
+  const q   = document.getElementById('search-input').value;
+  const sev = document.getElementById('sev-filter').value;
+  const params = new URLSearchParams({ page, limit: 20, q, severity: sev });
+  const r = await fetch('/api/alerts?' + params);
+  const d = await r.json();
+
+  const tbody = document.getElementById('alert-tbody');
+  tbody.innerHTML = d.alerts.map(a => {
+    const score = (a.anomaly_score || 0);
+    const pct   = Math.round(score * 100);
+    const fillColor = score > .7 ? 'var(--red)' : score > .4 ? 'var(--orange)' : 'var(--green)';
+    const ts = (a.timestamp||'').slice(0,19).replace('T',' ');
+    return `
+      <tr>
+        <td style="color:var(--dim)">${a.id}</td>
+        <td style="color:var(--dim)">${ts}</td>
+        <td style="color:var(--accent)">${a.source_ip||'–'}</td>
+        <td>${a.attack_type||'–'}</td>
+        <td style="color:var(--dim);font-size:10px;">${a.mitre_tag||'–'}</td>
+        <td>
+          <div class="score-bar">
+            <div class="score-fill" style="width:${pct}%;background:${fillColor};"></div>
+          </div>
+          <span style="font-size:10px;color:var(--dim)">${score.toFixed(2)}</span>
+        </td>
+        <td><span class="badge ${a.severity}">${a.severity}</span></td>
+        <td>
+          ${a.llm_summary
+            ? `<span style="font-size:11px;color:var(--dim)">${a.llm_summary.slice(0,60)}…</span>`
+            : `<button class="btn-summary" onclick="openSummary(${a.id})">Generate</button>`
+          }
+        </td>
+      </tr>`;
+  }).join('') || `<tr><td colspan="8" style="text-align:center;color:var(--dim);padding:30px;">No alerts yet. Start the demo log generator.</td></tr>`;
+
+  const total = d.total;
+  const pages = Math.ceil(total / 20);
+  document.getElementById('page-info').textContent = `Page ${page} of ${Math.max(pages,1)}`;
+  document.getElementById('total-info').textContent = `${total} total`;
+  document.getElementById('btn-prev').disabled = page <= 1;
+  document.getElementById('btn-next').disabled = page >= pages;
+}
+
+function prevPage() { loadAlerts(currentPage - 1); }
+function nextPage() { loadAlerts(currentPage + 1); }
+setInterval(() => loadAlerts(currentPage), 8000);
+loadAlerts(1);
+
+// ── Live SSE feed ─────────────────────────────────────────────────────────────
+let feedCount = 0;
+const feed = document.getElementById('live-feed');
+const evtSrc = new EventSource('/stream');
+
+evtSrc.onmessage = function(e) {
+  const ev = JSON.parse(e.data);
+  feedCount++;
+  document.getElementById('feed-count').textContent = feedCount + ' events';
+
+  const sev = (ev.severity || '').toLowerCase();
+  const ts  = (ev.timestamp || '').slice(11,19);
+  const ip  = ev.source_ip || '0.0.0.0';
+  const msg = ev.raw_log ? ev.raw_log.slice(0,120) : (ev.attack_type || 'event');
+
+  const line = document.createElement('div');
+  line.className = `feed-line ${sev}`;
+  line.innerHTML = `
+    <span class="feed-ts">${ts}</span>
+    <span class="feed-ip">${ip}</span>
+    <span class="feed-msg">${escapeHtml(msg)}</span>`;
+  feed.prepend(line);
+  if (feed.children.length > 200) feed.lastElementChild.remove();
+};
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Summary modal ─────────────────────────────────────────────────────────────
+async function openSummary(id) {
+  document.getElementById('modal-text').textContent = 'Generating AI summary…';
+  document.getElementById('modal-overlay').classList.add('open');
+  try {
+    const r = await fetch(`/api/alerts/${id}/summary`);
+    const d = await r.json();
+    document.getElementById('modal-text').textContent = d.summary || 'No summary available.';
+    loadAlerts(currentPage);   // refresh table to show summary
+  } catch {
+    document.getElementById('modal-text').textContent = 'Error generating summary.';
+  }
+}
+
+function closeModal(e) {
+  if (!e || e.target === document.getElementById('modal-overlay')) {
+    document.getElementById('modal-overlay').classList.remove('open');
+  }
+}
+</script>
+</body>
+</html>

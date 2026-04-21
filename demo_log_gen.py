@@ -1,11 +1,3 @@
-"""
-ARIA – Demo Log Generator
-Writes realistic fake log lines to logs/demo.log so you can
-test ARIA without a real server. Run this in a separate terminal:
-
-    python demo_log_gen.py
-"""
-
 import random
 import time
 import os
@@ -17,7 +9,7 @@ LOG_PATH = "logs/demo.log"
 IPS = [
     "192.168.1.45", "10.0.0.23", "172.16.4.88",
     "203.0.113.12", "198.51.100.7", "45.55.200.1",
-    "91.108.4.1", "1.2.3.4",
+    "91.108.4.1",   "1.2.3.4",
 ]
 
 USERS = ["root", "admin", "ubuntu", "deploy", "git", "oracle", "postgres"]
@@ -42,52 +34,53 @@ APACHE_TEMPLATES = [
     '{ip} - - [{ts}] "GET /admin/config HTTP/1.1" 403 256',
 ]
 
-MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-
 
 def auth_line(aggressive: bool = False) -> str:
-    now   = datetime.now()
-    month = MONTHS[now.month - 1]
-    day   = f"{now.day:2d}"
-    ts_str = now.strftime("%H:%M:%S")
+    now = datetime.now()
+    # FIX: Use strftime("%b") instead of a manual MONTHS list
+    prefix = f"{now.strftime('%b')} {now.day:2d} {now.strftime('%H:%M:%S')} myserver sshd[{random.randint(1000, 9999)}]"
     user = "root" if aggressive else random.choice(USERS)
     ip   = random.choice(IPS[:2] if aggressive else IPS)
     tpl  = random.choice(AUTH_TEMPLATES[:3] if aggressive else AUTH_TEMPLATES)
     msg  = tpl.format(user=user, ip=ip, port=random.randint(40000, 65000))
-    return f"{month} {day} {ts_str} myserver sshd[{random.randint(1000,9999)}]: {msg}"
+    return f"{prefix}: {msg}"
 
 
 def apache_line() -> str:
-    now   = datetime.now()
+    now    = datetime.now()
     ts_str = now.strftime("%d/%b/%Y:%H:%M:%S +0000")
-    ip  = random.choice(IPS)
-    tpl = random.choice(APACHE_TEMPLATES)
+    ip     = random.choice(IPS)
+    tpl    = random.choice(APACHE_TEMPLATES)
     return tpl.format(ip=ip, ts=ts_str)
 
 
 def main():
     print(f"[demo_log_gen] Writing to {LOG_PATH}. Press Ctrl+C to stop.")
     burst_countdown = 0
-    with open(LOG_PATH, "a") as f:
-        while True:
-            # Occasionally simulate a brute-force burst
-            if burst_countdown > 0:
-                line = auth_line(aggressive=True)
-                burst_countdown -= 1
-            elif random.random() < 0.03:
-                # Start a burst
-                burst_countdown = random.randint(15, 30)
-                line = auth_line(aggressive=True)
-                print("[demo_log_gen] 🚨 Starting brute-force burst!")
-            elif random.random() < 0.4:
-                line = apache_line()
-            else:
-                line = auth_line()
+    # FIX: Wrap loop in try/except for clean Ctrl+C exit
+    try:
+        with open(LOG_PATH, "a") as f:
+            while True:
+                if burst_countdown > 0:
+                    line = auth_line(aggressive=True)
+                    burst_countdown -= 1
+                elif random.random() < 0.03:
+                    # FIX: Set countdown BEFORE writing so total burst length
+                    # is exactly burst_countdown (not burst_countdown + 1)
+                    burst_countdown = random.randint(15, 30) - 1
+                    line = auth_line(aggressive=True)
+                    print("[demo_log_gen] 🚨 Starting brute-force burst!")
+                elif random.random() < 0.4:
+                    line = apache_line()
+                else:
+                    line = auth_line()
 
-            f.write(line + "\n")
-            f.flush()
-            print(line)
-            time.sleep(random.uniform(0.3, 1.2))
+                f.write(line + "\n")
+                f.flush()
+                print(line)
+                time.sleep(random.uniform(0.3, 1.2))
+    except KeyboardInterrupt:
+        print("\n[demo_log_gen] Stopped.")
 
 
 if __name__ == "__main__":

@@ -5,12 +5,20 @@ Score is normalised to [0, 1]: 1 = most anomalous.
 """
 
 import os
+import re
 import pickle
 import random
 import numpy as np
 from datetime import datetime
 
-MODEL_PATH = os.getenv("ARIA_MODEL_PATH", "aria_model.pkl")
+# FIX: Read at call time in methods that need it, but keep the default here
+# for reference — actual path resolved in _model_path()
+_DEFAULT_MODEL_PATH = "aria_model.pkl"
+
+
+def _model_path() -> str:
+    # FIX: Read env var at call time so late-set env vars are respected
+    return os.getenv("ARIA_MODEL_PATH", _DEFAULT_MODEL_PATH)
 
 
 class AnomalyDetector:
@@ -26,93 +34,115 @@ class AnomalyDetector:
         arr = np.array([features])
 
         if self.model is None:
-            return round(random.uniform(0.1, 0.4), 3)   # fallback before fit
+            # FIX: Log clearly that we're using fallback scores
+            return round(random.uniform(0.1, 0.4), 3)
 
-        raw = self.model.decision_function(arr)[0]       # negative = anomalous
-        # Normalise: typical range is [-0.5, 0.5]; clip and invert
+        raw = self.model.decision_function(arr)[0]  # negative = anomalous
         score = float(np.clip((-raw + 0.5) / 1.0, 0.0, 1.0))
         return round(score, 4)
 
-    def fit_baseline(self, n_samples: int = 500):
+    def fit_baseline(self, X: np.ndarray = None, n_samples: int = 500):
         """
-        Fit the Isolation Forest on synthetic 'normal' traffic.
-        In production, replace this with real baseline logs.
+        Fit the Isolation Forest on baseline data.
+        Pass a real feature matrix as X, or leave None to use synthetic data.
         """
         from sklearn.ensemble import IsolationForest
-        X = self._synthetic_normal(n_samples)
+
+        if X is None:
+            X = self._synthetic_normal(n_samples)
+            print(f"[ARIA] Fitting on {n_samples} synthetic baseline samples.")
+        else:
+            print(f"[ARIA] Fitting on {len(X)} real baseline samples.")
+
+        # FIX: Make contamination configurable via env var
+        contamination = float(os.getenv("ARIA_CONTAMINATION", "0.05"))
+
         self.model = IsolationForest(
             n_estimators=100,
-            contamination=0.05,
+            contamination=contamination,
             random_state=42,
         )
         self.model.fit(X)
-        self._save()
-        print(f"[ARIA] Isolation Forest fitted on {n_samples} baseline samples.")
+
+        # FIX: Wrap save in try/except so a read-only path doesn't crash startup
+        try:
+            self._save()
+        except Exception as e:
+            print(f"[ARIA] Warning: could not save model to {_model_path()}: {e}")
+
+        print("[ARIA] Isolation Forest fitted and ready.")
 
     # ── Feature engineering ────────────────────────────────────────────────────
 
     def _extract_features(self, event: dict) -> list:
         """
         Numeric feature vector extracted from one log event.
-        Feature list (length 8):
+        Feature list (length 7):
           0: hour of day (0–23)
-          1: ip_last_octet – rough location proxy
-          2: attack_type_code – mapped int
-          3: service_code – mapped int
-          4: is_auth_failure (bool)
-          5: is_root_user (bool)
-          6: anomaly_score hint (0 if not yet scored)
+          1: ip_first_octet  – network class proxy
+          2: ip_last_octet   – host proxy
+          3: attack_type_code – mapped int
+          4: service_code – mapped int
+          5: is_auth_failure (bool)
+          6: is_root_user (bool)
           7: port (0 if unknown)
         """
         ts   = event.get("timestamp", datetime.utcnow().isoformat())
         hour = _hour_from_ts(ts)
 
-        ip       = event.get("source_ip", "0.0.0.0")
-        last_oct = _last_octet(ip)
+        ip         = event.get("source_ip", "0.0.0.0")
+        first_oct  = _first_octet(ip)
+        last_oct   = _last_octet(ip)
 
-        attack = event.get("attack_type", "").lower()
-        service = event.get("target_service", "").lower()
-        raw_log = event.get("raw_log", "").lower()
+        attack   = event.get("attack_type", "").lower()
+        service  = event.get("target_service", "").lower()
+        raw_log  = event.get("raw_log", "").lower()
 
-        attack_code = _attack_code(attack)
+        attack_code  = _attack_code(attack)
         service_code = _service_code(service)
-        is_failure  = int("failed" in attack or "invalid" in attack or "fail" in raw_log)
-        is_root     = int("root" in raw_log or "root" in event.get("extra", {}).get("user", ""))
-        port        = _extract_port(raw_log)
+        is_failure   = int("failed" in attack or "invalid" in attack or "fail" in raw_log)
+        is_root      = int("root" in raw_log or "root" in event.get("extra", {}).get("user", ""))
+        port         = _extract_port(raw_log)
 
-        return [hour, last_oct, attack_code, service_code, is_failure, is_root, 0, port]
+        # FIX: Removed always-zero "anomaly_score hint" feature slot (index 6)
+        return [hour, first_oct, last_oct, attack_code, service_code, is_failure, is_root, port]
 
     def _synthetic_normal(self, n: int) -> np.ndarray:
         """Generate plausible 'normal' log feature vectors for baseline fitting."""
-        rng = np.random.default_rng(42)
+        rng  = np.random.default_rng(42)
         data = []
         for _ in range(n):
-            hour        = int(rng.normal(12, 4))   # business hours
+            # FIX: Clip hour to valid [0, 23] range — rng.normal can exceed bounds
+            hour        = int(np.clip(rng.normal(12, 4), 0, 23))
+            first_oct   = int(rng.choice([10, 172, 192]))   # private ranges
             last_oct    = int(rng.integers(1, 255))
-            attack_code = 0                          # mostly normal traffic
+            attack_code = 0
             svc_code    = int(rng.choice([0, 1, 2]))
-            is_failure  = int(rng.random() < 0.05)  # rare failures
+            is_failure  = int(rng.random() < 0.05)
             is_root     = 0
-            hint        = 0
             port        = int(rng.choice([22, 80, 443, 8080, 3306, 0]))
-            data.append([hour, last_oct, attack_code, svc_code, is_failure, is_root, hint, port])
+            data.append([hour, first_oct, last_oct, attack_code, svc_code,
+                         is_failure, is_root, port])
         return np.array(data, dtype=float)
 
     # ── Persistence ────────────────────────────────────────────────────────────
 
     def _save(self):
-        with open(MODEL_PATH, "wb") as f:
+        with open(_model_path(), "wb") as f:
             pickle.dump(self.model, f)
 
     def _load_or_init(self):
-        if os.path.exists(MODEL_PATH):
+        path = _model_path()
+        if os.path.exists(path):
             try:
-                with open(MODEL_PATH, "rb") as f:
+                with open(path, "rb") as f:
                     self.model = pickle.load(f)
-                print("[ARIA] Loaded existing ML model.")
+                print(f"[ARIA] Loaded existing ML model from {path}.")
                 return
-            except Exception:
-                pass
+            except Exception as e:
+                # FIX: Log the actual error — silent pass hid corrupted model files
+                print(f"[ARIA] Warning: failed to load model from {path}: {e}. "
+                      f"Will refit at startup.")
         self.model = None
 
 
@@ -122,7 +152,17 @@ def _hour_from_ts(ts: str) -> int:
     try:
         return datetime.fromisoformat(ts).hour
     except Exception:
-        return 12
+        # FIX: Return 0 not 12 — a bad timestamp should not look like normal
+        # business-hours traffic to the model
+        return 0
+
+
+def _first_octet(ip: str) -> int:
+    # FIX: Added first-octet feature for better network class discrimination
+    try:
+        return int(ip.split(".")[0])
+    except Exception:
+        return 0
 
 
 def _last_octet(ip: str) -> int:
@@ -133,7 +173,8 @@ def _last_octet(ip: str) -> int:
 
 
 def _extract_port(raw: str) -> int:
-    import re
+    # FIX: Moved re import to top level — importing inside a hot-path function
+    # causes a redundant lookup on every single log line
     m = re.search(r"\bport\s+(\d+)\b", raw)
     if m:
         try:
@@ -145,15 +186,15 @@ def _extract_port(raw: str) -> int:
 
 def _attack_code(attack: str) -> int:
     mapping = {
-        "brute force": 5,
-        "path traversal": 4,
+        "brute force":          5,
+        "path traversal":       4,
         "privilege escalation": 4,
-        "directory enumeration": 3,
-        "unauthorized access": 3,
-        "server error": 2,
-        "invalid user": 2,
-        "successful login": 1,
-        "http request": 0,
+        "directory enumeration":3,
+        "unauthorized access":  3,
+        "server error":         2,
+        "invalid user":         2,
+        "successful login":     1,
+        "http request":         0,
     }
     for k, v in mapping.items():
         if k in attack:

@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 5s          # How often to scrape targets
+  evaluation_interval: 5s      # How often to evaluate rules
+  scrape_timeout: 4s           # Must be less than scrape_interval
+
+scrape_configs:
+  - job_name: 'aria'
+    metrics_path: '/metrics'   # Explicit, matches prometheus_flask_exporter default
+    static_configs:
+      - targets: ['localhost:5000']

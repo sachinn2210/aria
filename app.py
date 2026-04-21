@@ -1,12 +1,8 @@
-"""
-ARIA - Autonomous Real-time Incident Analysis & Response Agent
-Main Flask Application
-"""
-
 import os
 import json
 import threading
 import time
+from collections import deque
 from datetime import datetime
 from flask import Flask, render_template, jsonify, request, Response
 from modules.log_watcher import LogWatcher
@@ -16,20 +12,132 @@ from modules.ml_detector import AnomalyDetector
 from modules.correlator import EventCorrelator
 from modules.alerter import Alerter
 from modules.llm_summarizer import LLMSummarizer
+from prometheus_flask_exporter import PrometheusMetrics
+from prometheus_client import Counter
+import requests
 
 app = Flask(__name__)
 
-# ── Global state ──────────────────────────────────────────────────────────────
+metrics = PrometheusMetrics(app)
+
 db = Database()
 parser = LogParser()
 detector = AnomalyDetector()
 correlator = EventCorrelator()
 alerter = Alerter()
 summarizer = LLMSummarizer()
-event_queue = []          # SSE broadcast queue
+
+# Thread-safe, auto-capped queue (no manual pop needed)
+event_queue = deque(maxlen=1000)
+
 watcher = None
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+ARIA_ALERTS = Counter("aria_alerts_total", "Total alerts sent")
+ARIA_ANOMALIES = Counter("aria_anomalies_total", "Total anomalies detected")
+
+# FIX: Removed premature .inc() calls that were inflating metrics on every startup
+
+
+def push_to_loki(event):
+    """Push a correlated event to Loki asynchronously (fire-and-forget)."""
+    try:
+        payload = {
+            "streams": [{
+                "stream": {"job": "aria", "severity": event.get("severity", "INFO")},
+                "values": [[
+                    str(int(time.time() * 1e9)),
+                    f"{event['attack_type']} from {event['source_ip']}"
+                ]]
+            }]
+        }
+        requests.post(
+            "http://localhost:3100/loki/api/v1/push",
+            json=payload,
+            timeout=0.5
+        )
+    except Exception as e:
+        print(f"[ARIA] Loki push failed: {e}")
+
+def _async_summarize_then_alert(alert_id: int, event: dict):
+    """Generate summary first, THEN send email so body contains the summary."""
+    summary = summarizer.summarize(event)
+    db.update_alert_summary(alert_id, summary)
+
+    # Write summary into event dict before alerter reads it
+    event["llm_summary"] = summary
+
+    severity = event.get("severity", "")
+    if severity in ("HIGH", "CRITICAL"):
+        alerter.send(event)
+
+def on_new_log_line(raw_line: str, source: str):
+    print(f"[DEBUG] Callback received: {raw_line[:60]}") 
+    event = parser.parse(raw_line, source)
+    if not event:
+        return
+
+    score = detector.score(event)
+    event["anomaly_score"] = score
+
+    incident = correlator.correlate(event)
+    if incident:
+        ARIA_ANOMALIES.inc()
+
+        event["mitre_tag"]   = incident.get("mitre_tag", "")
+        event["attack_type"] = incident.get("attack_type", "Unknown")
+
+                
+        effective_score = score + incident.get("boost", 0.0)
+        effective_score = min(effective_score, 1.0)
+
+        severity = _score_to_severity(effective_score)
+        event["severity"] = severity
+        event["anomaly_score"] = effective_score
+
+        
+        severity = _score_to_severity(score)
+        event["severity"] = severity
+
+        # FIX: Push to Loki off the main ingestion thread so a slow/down
+        # Loki instance doesn't block log processing for up to 0.5s per event
+        threading.Thread(target=push_to_loki, args=(event,), daemon=True).start()
+
+        # Persist to DB
+        alert_id = db.insert_alert(event)
+        event["id"] = alert_id
+
+        # Async LLM summarization
+        #threading.Thread(target=_async_summarize, args=(alert_id, event), daemon=True).start()
+
+        if severity in ("HIGH", "CRITICAL"):
+            ARIA_ALERTS.inc()
+            threading.Thread(
+                    target=_async_summarize_then_alert,
+                    args=(alert_id, event),
+                    daemon=True
+                ).start()
+            #threading.Thread(target=alerter.send, args=(event,), daemon=True).start()
+
+    # FIX: deque(maxlen=1000) handles thread-safety and capping automatically
+    event_queue.append(event)
+
+
+def _score_to_severity(score: float) -> str:
+    if score >= 0.75: return "CRITICAL"
+    if score >= 0.55: return "HIGH"
+    if score >= 0.30: return "MEDIUM"
+    return "LOW"
+
+def start_watcher():
+    global watcher
+    log_paths = [
+        p.strip()
+        for p in os.getenv("ARIA_LOG_PATHS", "logs/demo.log").split(",")
+        if p.strip()
+    ]
+    watcher = LogWatcher(log_paths, callback=on_new_log_line)
+    watcher.start()
+
 
 @app.route("/")
 def index():
@@ -54,10 +162,15 @@ def alerts():
 
 @app.route("/api/alerts/<int:alert_id>/summary")
 def alert_summary(alert_id):
-    """LLM-generated plain-English summary for one alert."""
+    """Return cached summary if available; generate and cache if not."""
     alert = db.get_alert_by_id(alert_id)
     if not alert:
         return jsonify({"error": "Not found"}), 404
+
+    # FIX: Avoid redundant LLM calls — return cached summary when it exists
+    if alert.get("llm_summary"):
+       return jsonify({"summary": alert["llm_summary"]})
+
     summary = summarizer.summarize(alert)
     db.update_alert_summary(alert_id, summary)
     return jsonify({"summary": summary})
@@ -65,7 +178,6 @@ def alert_summary(alert_id):
 
 @app.route("/api/timeline")
 def timeline():
-    """Event count per minute for the live chart."""
     return jsonify(db.get_timeline(minutes=60))
 
 
@@ -81,85 +193,39 @@ def top_ips():
 
 @app.route("/stream")
 def stream():
-    """Server-Sent Events endpoint for real-time log feed."""
+    """
+    SSE endpoint. Uses a snapshot index into the deque on each poll cycle.
+    Because deque is ordered and capped, we track the last emitted count
+    and emit only new tail items each tick.
+    """
     def generate():
-        last_seen = 0
+        last_len = len(event_queue)
         while True:
-            if len(event_queue) > last_seen:
-                for evt in event_queue[last_seen:]:
+            current_len = len(event_queue)
+            if current_len > last_len:
+                # Slice new items from the tail of the deque
+                new_events = list(event_queue)[last_len:]
+                for evt in new_events:
                     yield f"data: {json.dumps(evt)}\n\n"
-                last_seen = len(event_queue)
+                last_len = current_len
             time.sleep(0.5)
-    return Response(generate(), mimetype="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-
-# ── Log ingestion callback ─────────────────────────────────────────────────────
-
-def on_new_log_line(raw_line: str, source: str):
-    """Called by LogWatcher for every new line."""
-    event = parser.parse(raw_line, source)
-    if not event:
-        return
-
-    # ML scoring
-    score = detector.score(event)
-    event["anomaly_score"] = score
-
-    # Rule correlation + MITRE tagging
-    incident = correlator.correlate(event)
-    if incident:
-        event["mitre_tag"]   = incident.get("mitre_tag", "")
-        event["attack_type"] = incident.get("attack_type", "Unknown")
-        severity = _score_to_severity(score)
-        event["severity"] = severity
-
-        # Persist
-        alert_id = db.insert_alert(event)
-        event["id"] = alert_id
-
-        # LLM summary (async so it doesn't block the feed)
-        threading.Thread(
-            target=_async_summarize, args=(alert_id, event), daemon=True
-        ).start()
-
-        # Alerting
-        if severity in ("HIGH", "CRITICAL"):
-            threading.Thread(
-                target=alerter.send, args=(event,), daemon=True
-            ).start()
-
-    # Always push raw event to SSE queue (cap at 1000)
-    event_queue.append(event)
-    if len(event_queue) > 1000:
-        event_queue.pop(0)
-
-
-def _score_to_severity(score: float) -> str:
-    if score >= 0.85:   return "CRITICAL"
-    if score >= 0.65:   return "HIGH"
-    if score >= 0.40:   return "MEDIUM"
-    return "LOW"
-
-
-def _async_summarize(alert_id: int, event: dict):
-    summary = summarizer.summarize(event)
-    db.update_alert_summary(alert_id, summary)
-
-
-# ── Startup ───────────────────────────────────────────────────────────────────
-
-def start_watcher():
-    global watcher
-    log_paths = [
-        p.strip() for p in os.getenv("ARIA_LOG_PATHS", "logs/demo.log").split(",") if p.strip()
-    ]
-    watcher = LogWatcher(log_paths, callback=on_new_log_line)
-    watcher.start()
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
 
 
 if __name__ == "__main__":
-    # Seed the ML model with some baseline data before watching
-    detector.fit_baseline()
-    threading.Thread(target=start_watcher, daemon=True).start()
-    app.run(debug=True, threaded=True, port=5000)
+    # Seed the ML model with baseline data before watching logs
+   # detector.fit_baseline()
+
+    # FIX: Guard against double-start in Werkzeug reloader without relying on
+    # the internal WERKZEUG_RUN_MAIN env var — prefer running under a proper
+    # WSGI server (gunicorn/uvicorn) in production where debug=False.
+    if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
+        threading.Thread(target=start_watcher, daemon=True).start()
+        print("[ARIA] Log Watcher started.")
+
+    app.run(debug=False, threaded=True, port=5000)

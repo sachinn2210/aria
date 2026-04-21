@@ -67,7 +67,9 @@ const sevChart = new Chart(sevCtx, {
 
 // ── Stats Refresh ─────────────────────────────────────────────────────────────
 async function refreshStats() {
+  try{
   const r = await fetch('/api/stats');
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = await r.json();
   document.getElementById('stat-critical').textContent = d.critical ?? 0;
   document.getElementById('stat-high').textContent     = d.high ?? 0;
@@ -79,6 +81,10 @@ async function refreshStats() {
   document.getElementById('gauge-needle').style.left = Math.min(score * 100, 100) + '%';
   const gv = document.getElementById('gauge-val');
   gv.style.color = score > .7 ? 'var(--red)' : score > .4 ? 'var(--orange)' : 'var(--green)';
+}
+catch (err) {
+  console.error('[ARIA] Failed to refresh stats:', err);
+}
 }
 
 async function refreshTimeline() {
@@ -147,9 +153,9 @@ async function loadAlerts(page = 1) {
       <tr>
         <td style="color:var(--dim)">${a.id}</td>
         <td style="color:var(--dim)">${ts}</td>
-        <td style="color:var(--accent)">${a.source_ip || '–'}</td>
-        <td>${a.attack_type || '–'}</td>
-        <td style="color:var(--dim);font-size:10px;">${a.mitre_tag || '–'}</td>
+<td style="color:var(--accent)">${escapeHtml(a.source_ip || '–')}</td>
+<td>${escapeHtml(a.attack_type || '–')}</td>
+<td style="color:var(--dim);font-size:10px;">${escapeHtml(a.mitre_tag || '–')}</td>
         <td>
           <div class="score-bar">
             <div class="score-fill" style="width:${pct}%;background:${fillColor};"></div>

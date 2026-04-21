@@ -1,0 +1,7 @@
+.env
+aria_model.pkl
+aria.db
+__pycache__/
+*.pyc
+logs/demo.log
+.vscode/

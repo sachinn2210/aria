@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 logs/demo.log
 .vscode/
+aria.db-shm
+aria.db-wal
+myvenv/

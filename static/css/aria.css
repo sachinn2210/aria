@@ -4,7 +4,7 @@
   --bg:       #050b14;
   --surface:  #0a1628;
   --border:   #1a2d4a;
-  --accent:   #00c8ff;
+  --accent:   #c4dce3;
   --red:      #ff3b5c;
   --orange:   #ff8c00;
   --yellow:   #f5c518;
@@ -57,14 +57,14 @@ header {
 }
 
 .status-dot {
-  width: 8px; height: 8px; border-radius: 50%;
+  width: 12px; height: 12px; border-radius: 50%;
   background: var(--green);
   box-shadow: 0 0 12px var(--green);
   animation: pulse 2s infinite;
   display: inline-block; margin-right: 8px;
 }
-.status-label { font-family: var(--mono); font-size: 11px; color: var(--green); }
-#clock { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+.status-label { font-family: var(--mono); font-size: 16px; color: var(--green); }
+#clock { font-family: var(--mono); font-size: 16px; color: var(--accent); }
 
 @keyframes pulse {
   0%,100% { opacity: 1; box-shadow: 0 0 12px var(--green); }
@@ -123,8 +123,8 @@ main { padding: 24px 28px; position: relative; z-index: 1; }
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 18px;
   border-bottom: 1px solid var(--border);
-  font-size: 11px; letter-spacing: 2px;
-  text-transform: uppercase; color: var(--dim);
+  font-size: 16px; letter-spacing: 2px;
+  text-transform: uppercase; color: var(--accent);
 }
 .panel-body { padding: 16px; }
 

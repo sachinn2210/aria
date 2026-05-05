@@ -165,7 +165,7 @@ async function loadAlerts(page = 1) {
         <td><span class="badge ${a.severity}">${a.severity}</span></td>
         <td>
           ${a.llm_summary
-            ? `<span style="font-size:11px;color:var(--dim)">${escapeHtml(a.llm_summary.slice(0, 60))}…</span>`
+            ? `<span style="font-size:15px;color:var(--dim)">${escapeHtml(a.llm_summary.slice(0, 60))}…</span>`
             : `<button class="btn-summary" onclick="openSummary(${a.id})">Generate</button>`
           }
         </td>

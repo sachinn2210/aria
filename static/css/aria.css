@@ -53,7 +53,12 @@ header {
 }
 .logo span {
   color: var(--dim); font-weight: 400;
-  font-size: 11px; letter-spacing: 2px; margin-left: 8px;
+  font-size: 15px; letter-spacing: 2px; margin-left: 15px;
+}
+.logo span:hover {
+  color: var(--accent); font-weight: 400;
+  font-size: 15px; letter-spacing: 2px; margin-left: 15px;
+  transform: scale(1.1);
 }
 
 .status-dot {

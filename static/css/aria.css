@@ -1,4 +1,3 @@
-/* ARIA – Main Stylesheet */
 
 :root {
   --bg:       #050b14;
@@ -25,7 +24,6 @@ body {
   overflow-x: hidden;
 }
 
-/* Scanline overlay */
 body::before {
   content: '';
   position: fixed; inset: 0;
@@ -36,7 +34,6 @@ body::before {
   pointer-events: none; z-index: 0;
 }
 
-/* ── Header ── */
 header {
   position: sticky; top: 0; z-index: 100;
   display: flex; align-items: center; justify-content: space-between;
@@ -76,10 +73,8 @@ header {
   50%      { opacity: .5; box-shadow: 0 0 4px var(--green); }
 }
 
-/* ── Layout ── */
 main { padding: 24px 28px; position: relative; z-index: 1; }
 
-/* ── Stat Cards ── */
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -113,12 +108,10 @@ main { padding: 24px 28px; position: relative; z-index: 1; }
 .card.high .card-value     { color: var(--orange);  text-shadow: 0 0 20px rgba(255,140,0,.4); }
 .card.info .card-value     { color: var(--accent);  text-shadow: 0 0 20px rgba(0,200,255,.4); }
 
-/* ── Grid rows ── */
 .row { display: grid; gap: 16px; margin-bottom: 16px; }
 .row-3-1 { grid-template-columns: 2fr 1fr; }
 .row-2   { grid-template-columns: 1fr 1fr; }
 
-/* ── Panel ── */
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -133,7 +126,6 @@ main { padding: 24px 28px; position: relative; z-index: 1; }
 }
 .panel-body { padding: 16px; }
 
-/* ── Live Feed ── */
 #live-feed {
   height: 320px; overflow-y: auto;
   font-family: var(--mono); font-size: 11px; line-height: 1.8;
@@ -154,10 +146,8 @@ main { padding: 24px 28px; position: relative; z-index: 1; }
   100% { background: transparent; }
 }
 
-/* ── Charts ── */
 .chart-wrap { position: relative; height: 240px; }
 
-/* ── Gauge ── */
 .gauge-wrap { text-align: center; padding: 20px 0; }
 .gauge-value {
   font-size: 56px; font-weight: 800;
@@ -178,7 +168,6 @@ main { padding: 24px 28px; position: relative; z-index: 1; }
   box-shadow: 0 0 10px #fff;
 }
 
-/* ── Table controls ── */
 .table-controls {
   display: flex; gap: 10px; padding: 12px 16px;
   border-bottom: 1px solid var(--border);
@@ -193,7 +182,6 @@ main { padding: 24px 28px; position: relative; z-index: 1; }
 .table-controls input:focus,
 .table-controls select:focus { border-color: var(--accent); }
 
-/* ── Alert Table ── */
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 12px; font-family: var(--mono); }
 thead { background: var(--bg); }
@@ -209,7 +197,6 @@ td {
 }
 tr:hover td { background: rgba(0,200,255,.03); }
 
-/* ── Badges ── */
 .badge {
   display: inline-block; padding: 2px 8px; border-radius: 3px;
   font-size: 10px; letter-spacing: 1px; font-weight: 600;
@@ -219,7 +206,6 @@ tr:hover td { background: rgba(0,200,255,.03); }
 .badge.MEDIUM   { background: rgba(245,197,24,.15); color: var(--yellow); border: 1px solid rgba(245,197,24,.3); }
 .badge.LOW      { background: rgba(0,229,160,.10);  color: var(--green);  border: 1px solid rgba(0,229,160,.2); }
 
-/* ── Score bar ── */
 .score-bar {
   height: 4px; border-radius: 2px; min-width: 60px;
   background: var(--border); position: relative; overflow: hidden;
@@ -229,7 +215,6 @@ tr:hover td { background: rgba(0,200,255,.03); }
   border-radius: 2px; transition: width .4s;
 }
 
-/* ── Buttons ── */
 .btn-summary {
   background: transparent; border: 1px solid var(--border);
   color: var(--accent); padding: 3px 10px; border-radius: 3px;
@@ -238,7 +223,6 @@ tr:hover td { background: rgba(0,200,255,.03); }
 }
 .btn-summary:hover { border-color: var(--accent); background: rgba(0,200,255,.08); }
 
-/* ── Pagination ── */
 .pagination {
   display: flex; align-items: center; gap: 12px;
   padding: 12px 16px; border-top: 1px solid var(--border);
@@ -252,7 +236,6 @@ tr:hover td { background: rgba(0,200,255,.03); }
 .btn-page:hover:not(:disabled) { border-color: var(--accent); }
 .btn-page:disabled { opacity: .3; cursor: default; }
 
-/* ── Modal ── */
 .modal-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.7);
   z-index: 200; display: none;
@@ -273,7 +256,6 @@ tr:hover td { background: rgba(0,200,255,.03); }
   cursor: pointer; font-family: var(--mono); font-size: 11px;
 }
 
-/* ── Responsive ── */
 @media (max-width: 800px) {
   .row-3-1, .row-2 { grid-template-columns: 1fr; }
   main { padding: 16px; }

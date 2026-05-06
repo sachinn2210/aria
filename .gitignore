@@ -8,3 +8,4 @@ logs/demo.log
 aria.db-shm
 aria.db-wal
 myvenv/
+logs/

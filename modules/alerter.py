@@ -49,7 +49,7 @@ class Alerter:
             except Exception as e:
                 print(f"[ARIA] Telegram alert failed: {e}")
 
-        # Email — SendGrid with SMTP as true fallback
+        # email — SendGrid with SMTP as true fallback
         if ALERT_TO and RECEIVER_EMAIL:
             try:
                 self._send_email(event)
@@ -64,7 +64,6 @@ class Alerter:
                 print(f"[ARIA] Pushover alert failed: {e}")
 
 
-    # ── Email Dispatcher ───────────────────────────────────────────────────────
 
     def _send_email(self, event: dict):
         """Try SendGrid first; fall back to SMTP only if SendGrid fails."""
@@ -79,7 +78,6 @@ class Alerter:
             except Exception as e:
                 print(f"[ARIA] SendGrid failed, falling back to SMTP: {e}")
 
-    # ── SendGrid API ───────────────────────────────────────────────────────────
 
     def _send_sendgrid(self, event: dict):
         subject = (
@@ -104,7 +102,6 @@ class Alerter:
         print(f"[ARIA] SendGrid sent (status {response.status_code}).")
 
 
-    # ── SMTP Fallback ──────────────────────────────────────────────────────────
 
     def _send_smtp_fallback(self, event: dict):
         subject = f"[ARIA Fallback] {event.get('severity', '?')} Alert"
@@ -126,7 +123,6 @@ class Alerter:
         print("[ARIA] SMTP fallback sent.")
 
 
-    # ── Telegram ───────────────────────────────────────────────────────────────
 
     def _send_telegram(self, event: dict):
         text = (
@@ -158,7 +154,6 @@ class Alerter:
         print("[ARIA] Telegram alert sent.")
 
 
-    # ── Pushover ───────────────────────────────────────────────────────────────
 
     def _send_pushover(self, event: dict):
         text = (
@@ -176,7 +171,6 @@ class Alerter:
             timeout=10
         )
 
-        # FIX: Actually check the response instead of blindly printing it
         result = response.json()
         if not response.ok or result.get("status") != 1:
             raise Exception(f"Pushover error: {result.get('errors', 'Unknown')}")
@@ -184,7 +178,6 @@ class Alerter:
         print("[ARIA] Pushover alert sent.")
 
 
-    # ── Formatter ──────────────────────────────────────────────────────────────
 
     def _format_body(self, event: dict) -> str:
         return (
@@ -203,10 +196,8 @@ class Alerter:
         )
 
 
-# ── Test ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    # FIX: Moved test_event inside guard — no reason for it to be module-level
     test_event = {
         "severity":      "HIGH",
         "attack_type":   "SSH Brute Force",

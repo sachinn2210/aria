@@ -1,5 +1,5 @@
 """
-ARIA – Log Watcher
+ARIA - Log Watcher
 Tails one or more log files in real time using a polling approach.
 Handles file rotation, callback exceptions, and graceful shutdown.
 """

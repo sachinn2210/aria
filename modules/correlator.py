@@ -65,24 +65,23 @@ class EventCorrelator:
             self._ip_events[ip].append(datetime.utcnow())
             self._prune_window(ip, minutes=BURST_WINDOW_MINUTES)
 
-        # ── Rule 1: Burst detection ────────────────────────────────────────────
+        # Rule 1: Burst detection ────────────────────────────────────────────
         if ip and len(self._ip_events[ip]) >= BURST_THRESHOLD:
             return self._make_incident(event, "Brute Force", boost_score=True)
 
-        # ── Rule 2: sudo in raw log → always escalate regardless of score ──────
+        # Rule 2: sudo in raw log → always escalate regardless of score ──────
         # FIX: Moved before Rule 3 so privilege escalation via raw log is never
         # shadowed by an earlier threshold match on a different attack_type
         if "sudo" in event.get("raw_log", "").lower():
             return self._make_incident(event, "Privilege Escalation")
 
-        # ── Rule 3: Attack-type threshold ──────────────────────────────────────
+        # Rule 3: Attack-type threshold ──────────────────────────────────────
         threshold = ALERT_THRESHOLDS.get(attack_type, DEFAULT_THRESHOLD)
         if score >= threshold and attack_type:
             return self._make_incident(event, attack_type)
 
         return None
 
-    # ── Helpers ────────────────────────────────────────────────────────────────
 
     def _make_incident(
         self, event: dict, attack_type: str, boost_score: bool = False
@@ -105,8 +104,6 @@ class EventCorrelator:
         cutoff = datetime.utcnow() - timedelta(minutes=minutes)
         pruned = [t for t in self._ip_events[ip] if t > cutoff]
 
-        # FIX: Remove the key entirely when no recent events remain,
-        # preventing unbounded memory growth from unique attacker IPs
         if pruned:
             self._ip_events[ip] = pruned
         else:

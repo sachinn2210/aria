@@ -27,11 +27,10 @@ _SEVERITY_CASE = """
 class Database:
     def __init__(self, path: str = DB_PATH):
         self.path = path
-        # FIX: One connection per thread via threading.local()
+        # One connection per thread via threading.local()
         self._local = threading.local()
         self._init_schema()
 
-    # ── Connection helper ──────────────────────────────────────────────────────
 
     def _conn(self) -> sqlite3.Connection:
         """Return a per-thread cached connection."""
@@ -41,7 +40,7 @@ class Database:
             self._local.conn = conn
         return self._local.conn
 
-    # ── Schema ─────────────────────────────────────────────────────────────────
+    # Schema 
 
     def _init_schema(self):
         ddl = """
@@ -64,11 +63,11 @@ class Database:
         CREATE INDEX IF NOT EXISTS idx_ip        ON alerts(source_ip);
         """
         conn = self._conn()
-        # FIX: Set WAL mode once at init, not on every connection
+        # Set WAL mode once at init, not on every connection
         conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript(ddl)
 
-    # ── Write ──────────────────────────────────────────────────────────────────
+    #  Write 
 
     def insert_alert(self, event: dict) -> int:
         sql = """

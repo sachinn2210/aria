@@ -1,6 +1,3 @@
-/* ARIA – Dashboard JavaScript */
-
-// ── Clock ─────────────────────────────────────────────────────────────────────
 function updateClock() {
   document.getElementById('clock').textContent =
     new Date().toUTCString().slice(17, 25) + ' UTC';
@@ -8,11 +5,9 @@ function updateClock() {
 setInterval(updateClock, 1000);
 updateClock();
 
-// ── Chart.js defaults ─────────────────────────────────────────────────────────
 Chart.defaults.color = '#4a6480';
 Chart.defaults.borderColor = '#1a2d4a';
 
-// ── Timeline Chart ────────────────────────────────────────────────────────────
 const tlCtx = document.getElementById('timeline-chart').getContext('2d');
 const tlChart = new Chart(tlCtx, {
   type: 'line',
@@ -40,7 +35,6 @@ const tlChart = new Chart(tlCtx, {
   }
 });
 
-// ── Severity Doughnut ─────────────────────────────────────────────────────────
 const sevCtx = document.getElementById('sev-chart').getContext('2d');
 const sevChart = new Chart(sevCtx, {
   type: 'doughnut',
@@ -48,7 +42,7 @@ const sevChart = new Chart(sevCtx, {
     labels: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'],
     datasets: [{
       data: [0, 0, 0, 0],
-      backgroundColor: ['#ff3b5c', '#ff8c00', '#f5c518', '#00e5a0'],
+      backgroundColor: ['#ff3b5c', '#ff8c00', '#f7ff10', '#00e5a0'],
       borderWidth: 0,
     }]
   },
@@ -65,7 +59,6 @@ const sevChart = new Chart(sevCtx, {
   }
 });
 
-// ── Stats Refresh ─────────────────────────────────────────────────────────────
 async function refreshStats() {
   try{
   const r = await fetch('/api/stats');
@@ -132,7 +125,6 @@ function refreshAll() {
 setInterval(refreshAll, 5000);
 refreshAll();
 
-// ── Alert Table ───────────────────────────────────────────────────────────────
 let currentPage = 1;
 
 async function loadAlerts(page = 1) {
@@ -188,11 +180,9 @@ async function loadAlerts(page = 1) {
 function prevPage() { loadAlerts(currentPage - 1); }
 function nextPage() { loadAlerts(currentPage + 1); }
 
-// Auto-refresh table every 8 seconds
 setInterval(() => loadAlerts(currentPage), 8000);
 loadAlerts(1);
 
-// ── Live SSE Feed ─────────────────────────────────────────────────────────────
 let feedCount = 0;
 const feed = document.getElementById('live-feed');
 const evtSrc = new EventSource('/stream');
@@ -222,7 +212,6 @@ evtSrc.onerror = function () {
   console.warn('[ARIA] SSE connection lost, retrying...');
 };
 
-// ── Summary Modal ─────────────────────────────────────────────────────────────
 async function openSummary(id) {
   document.getElementById('modal-text').textContent = 'Generating AI summary…';
   document.getElementById('modal-overlay').classList.add('open');
@@ -242,7 +231,6 @@ function closeModal(e) {
   }
 }
 
-// ── Utility ───────────────────────────────────────────────────────────────────
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, '&amp;')

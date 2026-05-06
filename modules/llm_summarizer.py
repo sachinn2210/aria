@@ -15,7 +15,6 @@ import requests
 import os
 from datetime import datetime
 
-# Ollama runs locally — no API key needed
 OLLAMA_URL  = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 

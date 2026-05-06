@@ -13,7 +13,6 @@
 </head>
 <body>
 
-<!-- Header -->
 <header>
   <div style="display:flex;align-items:center;gap:16px;">
     <div class="logo">ARIA<span>AI-POWERED LOG FORENSICS</span></div>
@@ -25,7 +24,6 @@
 </header>
 
 <main>
-  <!-- Stat cards -->
   <div class="cards">
     <div class="card critical">
       <div class="card-label">Critical Alerts</div>
@@ -45,7 +43,6 @@
     </div>
   </div>
 
-  <!-- Row 1: Timeline + Gauge -->
   <div class="row row-3-1">
     <div class="panel">
       <div class="panel-header">
@@ -65,7 +62,6 @@
     </div>
   </div>
 
-  <!-- Row 2: Severity chart + Top IPs -->
   <div class="row row-2">
     <div class="panel">
       <div class="panel-header">Severity Breakdown</div>
@@ -79,7 +75,6 @@
     </div>
   </div>
 
-  <!-- Live feed -->
   <div class="panel" style="margin-bottom:16px;">
     <div class="panel-header">
       Real-time Event Feed
@@ -88,7 +83,6 @@
     <div id="live-feed"></div>
   </div>
 
-  <!-- Alert table -->
   <div class="panel">
     <div class="panel-header">Incident Alert Table</div>
     <div class="table-controls">
@@ -128,7 +122,6 @@
   </div>
 </main>
 
-<!-- Summary modal -->
 <div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
   <div class="modal">
     <h3>AI INCIDENT SUMMARY</h3>

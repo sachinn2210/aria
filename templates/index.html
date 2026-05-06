@@ -9,7 +9,7 @@
   <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="/static/css/aria.css"/>
-  
+  <link rel="stylesheet" href="/static/css/ingestion.css"/>
 </head>
 <body>
 
@@ -75,6 +75,168 @@
     </div>
   </div>
 
+  <!-- ═══════════════════════════ INGESTION PANEL ═══════════════════════════ -->
+  <div class="panel ingestion-panel" style="margin-bottom:16px;">
+    <div class="panel-header">
+      <span>⚡ Live Log Ingestion</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span id="ingest-proxy-badge" class="badge LOW" style="font-size:9px;letter-spacing:1px;">PROXY OFF</span>
+        <span id="ingest-status-msg" style="font-size:10px;color:var(--dim);font-family:var(--mono);">Ready</span>
+      </div>
+    </div>
+
+    <div class="ingest-tabs">
+      <button class="ingest-tab active" onclick="switchTab('proxy')">🌐 Reverse Proxy</button>
+      <button class="ingest-tab" onclick="switchTab('paste')">📋 Paste Logs</button>
+      <button class="ingest-tab" onclick="switchTab('upload')">📁 Upload File</button>
+      <button class="ingest-tab" onclick="switchTab('url')">🔗 Fetch from URL</button>
+      <button class="ingest-tab" onclick="switchTab('windows')">🪟 Windows Events</button>
+    </div>
+
+    <!-- Reverse Proxy Tab -->
+    <div id="tab-proxy" class="ingest-body">
+      <div class="ingest-description">
+        Point ARIA at any live HTTP server. Every request and response is intercepted,
+        logged in Apache format, and streamed through the full ARIA ML detection pipeline in real time.
+        Browse to <strong style="color:var(--accent)">http://localhost:8888</strong> after starting.
+      </div>
+      <div class="ingest-form">
+        <div class="ingest-row">
+          <label>Target URL</label>
+          <input id="proxy-target" type="text" placeholder="https://example.com  or  http://localhost:8080" style="flex:1;" />
+        </div>
+        <div class="ingest-row">
+          <label>Proxy Port</label>
+          <input id="proxy-port" type="number" value="8888" style="width:100px;" />
+          <span style="color:var(--dim);font-size:11px;font-family:var(--mono);">
+            → All traffic to <strong style="color:var(--accent);">localhost:8888</strong> is forwarded &amp; logged
+          </span>
+        </div>
+        <div class="ingest-row" style="gap:10px;">
+          <button class="btn-ingest-primary" id="proxy-start-btn" onclick="proxyStart()">▶ Start Proxy</button>
+          <button class="btn-ingest-danger"  id="proxy-stop-btn"  onclick="proxyStop()" disabled>■ Stop</button>
+          <div id="proxy-stats" style="margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--dim);"></div>
+        </div>
+      </div>
+      <div id="proxy-log-feed" class="mini-feed" style="display:none;">
+        <div class="mini-feed-header">Live proxy traffic ↓</div>
+        <div id="proxy-feed-lines"></div>
+      </div>
+    </div>
+
+    <!-- Paste Logs Tab -->
+    <div id="tab-paste" class="ingest-body" style="display:none;">
+      <div class="ingest-description">
+        Paste any log content — auth.log, Apache/Nginx access logs, Windows Event Log exports, syslog.
+        ARIA auto-detects the format and runs every line through the full ML + correlation pipeline.
+      </div>
+      <div class="ingest-form">
+        <div class="ingest-row">
+          <label>Source Label</label>
+          <input id="paste-source" type="text" placeholder="my-server" style="width:180px;" />
+          <span id="paste-format-hint" style="font-size:10px;color:var(--dim);font-family:var(--mono);margin-left:auto;"></span>
+        </div>
+        <textarea id="paste-text"
+          placeholder="Paste log lines here…
+
+auth.log example:
+May  6 14:22:01 server sshd[1234]: Failed password for root from 192.168.1.45 port 54321 ssh2
+
+Apache example:
+203.0.113.12 - - [06/May/2025:14:22:01 +0000] &quot;GET /wp-admin HTTP/1.1&quot; 401 512
+
+Windows Event Log export:
+TimeCreated: 2025-05-06T14:22:30 EventID: 4625 Source: Security Account Name: admin Source Address: 198.51.100.7"></textarea>
+        <div class="ingest-row">
+          <button class="btn-ingest-primary" onclick="pasteIngest()">⚡ Analyse Logs</button>
+          <button class="btn-ingest-secondary" onclick="loadSampleLogs()">Load Sample Logs</button>
+          <span id="paste-result" style="font-size:11px;font-family:var(--mono);color:var(--green);margin-left:auto;"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Upload File Tab -->
+    <div id="tab-upload" class="ingest-body" style="display:none;">
+      <div class="ingest-description">
+        Upload a log file directly from your machine. Supports auth.log, access.log, syslog,
+        Windows Event Log text exports, and any plaintext log format with IP addresses.
+      </div>
+      <div class="ingest-form">
+        <div class="drop-zone" id="drop-zone"
+             onclick="document.getElementById('file-input').click()"
+             ondragover="event.preventDefault();this.classList.add('drag-over')"
+             ondragleave="this.classList.remove('drag-over')"
+             ondrop="handleDrop(event)">
+          <div class="drop-icon">📂</div>
+          <div class="drop-text">Drop log file here or click to browse</div>
+          <div class="drop-hint">auth.log · access.log · syslog · .log · .txt</div>
+          <input id="file-input" type="file" accept=".log,.txt,.csv" style="display:none;"
+                 onchange="handleFileSelect(event)" />
+        </div>
+        <div class="ingest-row" style="margin-top:12px;">
+          <label>Source Label</label>
+          <input id="upload-source" type="text" placeholder="my-server" style="width:180px;" />
+        </div>
+        <div id="upload-result" style="margin-top:10px;font-family:var(--mono);font-size:12px;"></div>
+      </div>
+    </div>
+
+    <!-- Fetch from URL Tab -->
+    <div id="tab-url" class="ingest-body" style="display:none;">
+      <div class="ingest-description">
+        Fetch a raw log file exposed over HTTP/HTTPS and ingest directly into ARIA.
+        Useful for pulling logs from a log server, S3 bucket, or any HTTP-accessible endpoint.
+      </div>
+      <div class="ingest-form">
+        <div class="ingest-row">
+          <label>Log URL</label>
+          <input id="fetch-url" type="text"
+                 placeholder="http://your-server/logs/access.log"
+                 style="flex:1;" />
+        </div>
+        <div class="ingest-row">
+          <label>Source Label</label>
+          <input id="fetch-source" type="text" placeholder="remote-server" style="width:180px;" />
+        </div>
+        <div class="ingest-row">
+          <button class="btn-ingest-primary" onclick="fetchIngest()">⬇ Fetch &amp; Analyse</button>
+          <span id="fetch-result" style="font-size:11px;font-family:var(--mono);color:var(--green);margin-left:auto;"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Windows Events Tab -->
+    <div id="tab-windows" class="ingest-body" style="display:none;">
+      <div class="ingest-description">
+        Read Windows Security / System / Application Event Logs directly from the local machine.
+        Captures EventID 4624 (login), 4625 (failed login), 4672 (privilege escalation), 4768 (Kerberos).
+      </div>
+      <div class="ingest-form">
+        <div class="ingest-row">
+          <label>Event Log</label>
+          <select id="win-log" style="width:160px;">
+            <option value="Security">Security</option>
+            <option value="System">System</option>
+            <option value="Application">Application</option>
+          </select>
+          <label style="margin-left:16px;">Max Events</label>
+          <input id="win-max" type="number" value="200" style="width:80px;" />
+        </div>
+        <div class="ingest-row">
+          <button class="btn-ingest-primary" onclick="windowsIngest()">🪟 Read Event Log</button>
+          <span id="win-result" style="font-size:11px;font-family:var(--mono);color:var(--green);margin-left:auto;"></span>
+        </div>
+        <div style="margin-top:12px;padding:10px;background:rgba(0,200,255,0.04);border:1px solid var(--border);border-radius:6px;font-family:var(--mono);font-size:11px;color:var(--dim);">
+          <strong style="color:var(--accent);">Setup:</strong>&nbsp;
+          pip install pywin32 &nbsp;·&nbsp;
+          Run ARIA as Administrator &nbsp;·&nbsp;
+          EventIDs captured: 4624 · 4625 · 4648 · 4672 · 4768
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- ════════════════════════ END INGESTION PANEL ═════════════════════════ -->
+
   <div class="panel" style="margin-bottom:16px;">
     <div class="panel-header">
       Real-time Event Feed
@@ -131,5 +293,6 @@
 </div>
 
 <script src="/static/js/aria.js"></script>
+<script src="/static/js/aria_ingest.js"></script>
 </body>
 </html>

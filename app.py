@@ -13,6 +13,8 @@ from modules.correlator import EventCorrelator
 from modules.alerter import Alerter
 from modules.llm_summarizer import LLMSummarizer
 from modules.vapi_caller import trigger_voice_alert
+from modules.proxy_server import start_proxy, stop_proxy, proxy_status
+from modules.log_ingestion import ingest_log_text, fetch_remote_log, detect_log_format, save_uploaded_log
 from prometheus_flask_exporter import PrometheusMetrics
 from prometheus_client import Counter
 import requests as http_requests
@@ -59,21 +61,13 @@ def push_to_loki(event):
 # ── Alert pipeline ────────────────────────────────────────────────────────────
 
 def _async_summarize_then_alert(alert_id: int, event: dict):
-    """
-    1. Generate LLM summary
-    2. Persist it
-    3. Send email/Telegram via Alerter
-    4. Trigger VAPI voice call (CRITICAL by default, configurable)
-    """
     summary = summarizer.summarize(event)
     db.update_alert_summary(alert_id, summary)
     event["llm_summary"] = summary
 
     severity = event.get("severity", "")
     if severity in ("HIGH", "CRITICAL"):
-        # Email + Telegram
         alerter.send(event)
-        # VAPI voice call (runs in its own thread to avoid blocking)
         threading.Thread(
             target=trigger_voice_alert,
             args=(event,),
@@ -123,7 +117,7 @@ def _score_to_severity(score: float) -> str:
     return "LOW"
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+# ── Core Routes ────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
@@ -189,25 +183,200 @@ def stream():
     )
 
 
-# ── VAPI webhook: external systems can POST an event to trigger a call ────────
+# ── VAPI webhook ──────────────────────────────────────────────────────────────
 
 @app.route("/aria/event", methods=["POST"])
 def aria_event():
-    """
-    POST an ARIA event dict here to immediately trigger a VAPI voice call.
-    Can be used from external scripts or to manually test the voice pipeline.
-
-    Example:
-        curl -X POST http://localhost:5000/aria/event \\
-             -H 'Content-Type: application/json' \\
-             -d '{"severity":"CRITICAL","attack_type":"Brute Force",
-                  "source_ip":"1.2.3.4","llm_summary":"Test alert."}'
-    """
     event  = request.get_json(silent=True) or {}
     result = trigger_voice_alert(event)
     if result:
-        return jsonify({"ok": True,  "callId": result.get("id"), "status": result.get("status")})
+        return jsonify({"ok": True, "callId": result.get("id"), "status": result.get("status")})
     return jsonify({"ok": False, "reason": "Call not placed — check logs for details."}), 400
+
+
+# ── Proxy Routes ──────────────────────────────────────────────────────────────
+
+@app.route("/api/proxy/start", methods=["POST"])
+def proxy_start():
+    """
+    Start the reverse proxy.
+    Body: { "target": "https://example.com", "port": 8888 }
+    The proxy log file is automatically added to ARIA's watch list.
+    """
+    data       = request.get_json(silent=True) or {}
+    target     = data.get("target", "").strip()
+    port       = int(data.get("port", 8888))
+    log_file   = data.get("log_file", "logs/proxy_access.log")
+
+    if not target:
+        return jsonify({"ok": False, "error": "target URL is required"}), 400
+
+    result = start_proxy(target, port, log_file)
+    if not result["ok"]:
+        return jsonify(result), 500
+
+    # Hot-add the proxy log file to the running watcher
+    global watcher
+    if watcher and log_file not in watcher.paths:
+        watcher.paths.append(log_file)
+        t = threading.Thread(
+            target=watcher._tail,
+            args=(log_file,),
+            daemon=True,
+            name=f"tail:{log_file}",
+        )
+        watcher._threads.append(t)
+        t.start()
+        print(f"[ARIA] Hot-added proxy log to watcher: {log_file}")
+
+    return jsonify(result)
+
+
+@app.route("/api/proxy/stop", methods=["POST"])
+def proxy_stop():
+    return jsonify(stop_proxy())
+
+
+@app.route("/api/proxy/status")
+def proxy_status_route():
+    return jsonify(proxy_status())
+
+
+# ── Log Ingestion Routes ──────────────────────────────────────────────────────
+
+@app.route("/api/ingest/text", methods=["POST"])
+def ingest_text():
+    """
+    Paste raw log lines directly into ARIA.
+    Body: { "text": "<raw log content>", "source": "my-server" }
+    """
+    data   = request.get_json(silent=True) or {}
+    text   = data.get("text", "").strip()
+    source = data.get("source", "upload").strip() or "upload"
+
+    if not text:
+        return jsonify({"ok": False, "error": "No log text provided"}), 400
+
+    fmt   = detect_log_format(text[:2000])
+    count = ingest_log_text(text, on_new_log_line, source_tag=source)
+
+    # Also persist to disk so the watcher re-ingests on restart
+    try:
+        path = save_uploaded_log(text, filename=f"{source}.log")
+    except Exception:
+        path = None
+
+    return jsonify({
+        "ok":      True,
+        "lines":   count,
+        "format":  fmt,
+        "saved_to": path,
+        "source":  source,
+    })
+
+
+@app.route("/api/ingest/url", methods=["POST"])
+def ingest_url():
+    """
+    Fetch a raw log file from a URL and ingest into ARIA.
+    Body: { "url": "http://myserver/access.log", "source": "my-server" }
+    """
+    data   = request.get_json(silent=True) or {}
+    url    = data.get("url", "").strip()
+    source = data.get("source", "remote").strip() or "remote"
+
+    if not url:
+        return jsonify({"ok": False, "error": "url is required"}), 400
+
+    result = fetch_remote_log(url)
+    if not result["ok"]:
+        return jsonify(result), 400
+
+    processed = 0
+    for line in result["lines"]:
+        try:
+            on_new_log_line(line, source)
+            processed += 1
+        except Exception:
+            pass
+
+    return jsonify({
+        "ok":        True,
+        "fetched":   result["count"],
+        "processed": processed,
+        "format":    result["format"],
+        "url":       url,
+    })
+
+
+@app.route("/api/ingest/upload", methods=["POST"])
+def ingest_upload():
+    """
+    Multipart file upload endpoint for log files.
+    Form field: file  (the log file)
+                source (optional label)
+    """
+    if "file" not in request.files:
+        return jsonify({"ok": False, "error": "No file part"}), 400
+
+    f      = request.files["file"]
+    source = request.form.get("source", f.filename or "upload")
+
+    try:
+        text = f.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Could not read file: {e}"}), 400
+
+    fmt   = detect_log_format(text[:2000])
+    count = ingest_log_text(text, on_new_log_line, source_tag=source)
+
+    try:
+        path = save_uploaded_log(text, filename=f.filename or "upload.log")
+    except Exception:
+        path = None
+
+    return jsonify({
+        "ok":      True,
+        "lines":   count,
+        "format":  fmt,
+        "saved_to": path,
+        "source":  source,
+    })
+
+
+@app.route("/api/ingest/windows", methods=["GET"])
+def ingest_windows():
+    """
+    Read Windows Event Logs from the local machine (Windows only).
+    Query params: log=Security&max=200
+    """
+    from modules.log_ingestion import read_windows_event_logs, is_windows
+    if not is_windows():
+        return jsonify({
+            "ok":    False,
+            "error": "Windows Event Log reader is only available on Windows. "
+                     "Use the log upload or paste feature on Linux/Mac."
+        }), 400
+
+    log_name   = request.args.get("log", "Security")
+    max_events = int(request.args.get("max", 200))
+
+    lines     = list(read_windows_event_logs(log_name, max_events))
+    processed = 0
+    for line in lines:
+        if not line.startswith("#"):
+            try:
+                on_new_log_line(line, f"windows:{log_name}")
+                processed += 1
+            except Exception:
+                pass
+
+    return jsonify({
+        "ok":        True,
+        "read":      len(lines),
+        "processed": processed,
+        "log":       log_name,
+    })
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────
